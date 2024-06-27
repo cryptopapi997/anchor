@@ -11,6 +11,7 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
+default = []
 async = []
 debug = []
 rpc-client = []

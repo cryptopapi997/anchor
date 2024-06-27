@@ -4,7 +4,7 @@ use crate::{
 };
 use anchor_lang::{prelude::Pubkey, AccountDeserialize, Discriminator};
 #[cfg(feature = "rpc-client")]
-use solana_client::nonblocking::rpc_client::RpcClient as AsyncRpcClient;
+use solana_client::{nonblocking::rpc_client::RpcClient as AsyncRpcClient, rpc_client::RpcClient};
 use solana_client::{rpc_config::RpcSendTransactionConfig, rpc_filter::RpcFilterType};
 use solana_sdk::{
     commitment_config::CommitmentConfig, signature::Signature, signer::Signer,
@@ -107,7 +107,7 @@ impl<C: Deref<Target = impl Signer> + Clone> Program<C> {
     }
 }
 
-impl<'a, C: Deref<Target = impl Signer> + Clone> RequestBuilder<'a, C> {
+impl<'a, C: Deref<Target = impl Signer> + Clone> RequestBuilder<'a, C, Box<dyn Signer + 'a>> {
     #[cfg(not(feature = "rpc-client"))]
     pub fn from(
         program_id: Pubkey,
@@ -126,6 +126,7 @@ impl<'a, C: Deref<Target = impl Signer> + Clone> RequestBuilder<'a, C> {
             instruction_data: None,
             signers: Vec::new(),
             handle,
+            _phantom: PhantomData,
         }
     }
 
@@ -148,6 +149,7 @@ impl<'a, C: Deref<Target = impl Signer> + Clone> RequestBuilder<'a, C> {
             instruction_data: None,
             signers: Vec::new(),
             handle,
+            _phantom: PhantomData,
             async_rpc_client,
         }
     }
