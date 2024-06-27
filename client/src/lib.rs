@@ -155,6 +155,22 @@ impl<C: Clone + Deref<Target = impl Signer>> Client<C> {
 
         Program::new(program_id, cfg)
     }
+
+    #[cfg(feature = "rpc-client")]
+    pub fn program_with_custom_rpc(
+        &self,
+        program_id: Pubkey,
+        rpc_client: RpcClient,
+        async_rpc_client: AsyncRpcClient,
+    ) -> Result<Program<C>, ClientError> {
+        let cfg = Config {
+            cluster: self.cfg.cluster.clone(),
+            options: self.cfg.options,
+            payer: self.cfg.payer.clone(),
+        };
+
+        Program::new_with_rpc(program_id, cfg, rpc_client, async_rpc_client)
+    }
 }
 
 /// Auxiliary data structure to align the types of the Solana CLI utils with Anchor client.
@@ -220,6 +236,10 @@ pub struct Program<C> {
     sub_client: Arc<RwLock<Option<PubsubClient>>>,
     #[cfg(not(feature = "async"))]
     rt: tokio::runtime::Runtime,
+    #[cfg(feature = "rpc-client")]
+    rpc_client: RpcClient,
+    #[cfg(feature = "rpc-client")]
+    async_rpc_client: AsyncRpcClient,
 }
 
 impl<C: Deref<Target = impl Signer> + Clone> Program<C> {
@@ -227,7 +247,6 @@ impl<C: Deref<Target = impl Signer> + Clone> Program<C> {
         self.cfg.payer.pubkey()
     }
 
-    /// Returns a request builder.
     pub fn request(&self) -> RequestBuilder<'_, C, Box<dyn Signer + '_>> {
         RequestBuilder::from(
             self.program_id,
@@ -236,6 +255,8 @@ impl<C: Deref<Target = impl Signer> + Clone> Program<C> {
             self.cfg.options,
             #[cfg(not(feature = "async"))]
             self.rt.handle(),
+            #[cfg(feature = "rpc-client")]
+            &self.async_rpc_client,
         )
     }
 
@@ -247,6 +268,8 @@ impl<C: Deref<Target = impl Signer> + Clone> Program<C> {
             self.cfg.cluster.url(),
             self.cfg.payer.clone(),
             self.cfg.options,
+            #[cfg(feature = "rpc-client")]
+            &self.async_rpc_client,
         )
     }
 
@@ -254,6 +277,7 @@ impl<C: Deref<Target = impl Signer> + Clone> Program<C> {
         self.program_id
     }
 
+    #[cfg(not(feature = "rpc-client"))]
     pub fn rpc(&self) -> RpcClient {
         RpcClient::new_with_commitment(
             self.cfg.cluster.url().to_string(),
@@ -261,6 +285,7 @@ impl<C: Deref<Target = impl Signer> + Clone> Program<C> {
         )
     }
 
+    #[cfg(not(feature = "rpc-client"))]
     pub fn async_rpc(&self) -> AsyncRpcClient {
         AsyncRpcClient::new_with_commitment(
             self.cfg.cluster.url().to_string(),
@@ -268,14 +293,27 @@ impl<C: Deref<Target = impl Signer> + Clone> Program<C> {
         )
     }
 
+    #[cfg(feature = "rpc-client")]
+    pub fn rpc(&self) -> &RpcClient {
+        &self.rpc_client
+    }
+
+    #[cfg(feature = "rpc-client")]
+    pub fn async_rpc(&self) -> &AsyncRpcClient {
+        &self.async_rpc_client
+    }
+
     async fn account_internal<T: AccountDeserialize>(
         &self,
         address: Pubkey,
     ) -> Result<T, ClientError> {
+        #[cfg(not(feature = "rpc-client"))]
         let rpc_client = AsyncRpcClient::new_with_commitment(
             self.cfg.cluster.url().to_string(),
             self.cfg.options.unwrap_or_default(),
         );
+        #[cfg(feature = "rpc-client")]
+        let rpc_client = &self.async_rpc_client;
         let account = rpc_client
             .get_account_with_commitment(&address, CommitmentConfig::processed())
             .await?
@@ -539,6 +577,8 @@ pub struct RequestBuilder<'a, C, S: 'a> {
     signers: Vec<S>,
     #[cfg(not(feature = "async"))]
     handle: &'a Handle,
+    #[cfg(feature = "rpc-client")]
+    async_rpc_client: &'a AsyncRpcClient,
     _phantom: PhantomData<&'a ()>,
 }
 
@@ -664,17 +704,22 @@ impl<'a, C: Deref<Target = impl Signer> + Clone> RequestBuilder<'a, C, Box<dyn S
     }
 
     async fn signed_transaction_internal(&self) -> Result<Transaction, ClientError> {
-        let latest_hash =
-            AsyncRpcClient::new_with_commitment(self.cluster.to_owned(), self.options)
-                .get_latest_blockhash()
-                .await?;
+        #[cfg(not(feature = "rpc-client"))]
+        let rpc_client = AsyncRpcClient::new_with_commitment(self.cluster.to_owned(), self.options);
+        #[cfg(feature = "rpc-client")]
+        let rpc_client = self.async_rpc_client;
+
+        let latest_hash = rpc_client.get_latest_blockhash().await?;
         let tx = self.signed_transaction_with_blockhash(latest_hash)?;
 
         Ok(tx)
     }
 
     async fn send_internal(&self) -> Result<Signature, ClientError> {
+        #[cfg(not(feature = "rpc-client"))]
         let rpc_client = AsyncRpcClient::new_with_commitment(self.cluster.to_owned(), self.options);
+        #[cfg(feature = "rpc-client")]
+        let rpc_client = self.async_rpc_client;
         let latest_hash = rpc_client.get_latest_blockhash().await?;
         let tx = self.signed_transaction_with_blockhash(latest_hash)?;
 
@@ -688,7 +733,10 @@ impl<'a, C: Deref<Target = impl Signer> + Clone> RequestBuilder<'a, C, Box<dyn S
         &self,
         config: RpcSendTransactionConfig,
     ) -> Result<Signature, ClientError> {
+        #[cfg(not(feature = "rpc-client"))]
         let rpc_client = AsyncRpcClient::new_with_commitment(self.cluster.to_owned(), self.options);
+        #[cfg(feature = "rpc-client")]
+        let rpc_client = self.async_rpc_client;
         let latest_hash = rpc_client.get_latest_blockhash().await?;
         let tx = self.signed_transaction_with_blockhash(latest_hash)?;
 
@@ -732,17 +780,24 @@ impl<'a, C: Deref<Target = impl Signer> + Clone> RequestBuilder<'a, C, Arc<dyn T
     }
 
     async fn signed_transaction_internal(&self) -> Result<Transaction, ClientError> {
+        #[cfg(not(feature = "rpc-client"))]
         let latest_hash =
             AsyncRpcClient::new_with_commitment(self.cluster.to_owned(), self.options)
                 .get_latest_blockhash()
                 .await?;
+        #[cfg(feature = "rpc-client")]
+        let latest_hash = self.async_rpc_client.get_latest_blockhash().await?;
+
         let tx = self.signed_transaction_with_blockhash(latest_hash)?;
 
         Ok(tx)
     }
 
     async fn send_internal(&self) -> Result<Signature, ClientError> {
+        #[cfg(not(feature = "rpc-client"))]
         let rpc_client = AsyncRpcClient::new_with_commitment(self.cluster.to_owned(), self.options);
+        #[cfg(feature = "rpc-client")]
+        let rpc_client = self.async_rpc_client;
         let latest_hash = rpc_client.get_latest_blockhash().await?;
         let tx = self.signed_transaction_with_blockhash(latest_hash)?;
 
@@ -756,7 +811,10 @@ impl<'a, C: Deref<Target = impl Signer> + Clone> RequestBuilder<'a, C, Arc<dyn T
         &self,
         config: RpcSendTransactionConfig,
     ) -> Result<Signature, ClientError> {
+        #[cfg(not(feature = "rpc-client"))]
         let rpc_client = AsyncRpcClient::new_with_commitment(self.cluster.to_owned(), self.options);
+        #[cfg(feature = "rpc-client")]
+        let rpc_client = self.async_rpc_client;
         let latest_hash = rpc_client.get_latest_blockhash().await?;
         let tx = self.signed_transaction_with_blockhash(latest_hash)?;
 
