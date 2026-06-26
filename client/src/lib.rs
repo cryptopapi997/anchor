@@ -100,6 +100,7 @@ use {
             RpcTransactionLogsFilter,
         },
         filter::Memcmp,
+        request::RpcError,
         response::{Response as RpcResponse, RpcLogsResponse},
     },
     solana_signature::Signature,
@@ -807,10 +808,52 @@ impl<C: Deref<Target = impl Signer> + Clone, S: AsSigner> RequestBuilder<'_, C, 
             .map_err(Box::new)?;
         let tx = self.signed_transaction_with_blockhash_versioned(version, latest_hash)?;
 
-        self.internal_rpc_client
-            .send_and_confirm_transaction_with_spinner_and_commitment(&tx, self.options)
+        // FIXME: Inline a no-spinner version of `RpcClient::send_and_confirm_transaction`
+        // that honors the configured commitment level (`self.options`). The built-in
+        // non-spinner methods ignore the commitment, and the only commitment-aware
+        // confirmation helper (`send_and_confirm_transaction_with_spinner_and_commitment`)
+        // forces a spinner onto callers. Replace this with the non-spinner,
+        // commitment-aware method once we upgrade to Solana 4.0, which adds it.
+        let signature = self
+            .internal_rpc_client
+            .send_transaction(&tx)
             .await
-            .map_err(|e| Box::new(e).into())
+            .map_err(Box::new)?;
+
+        loop {
+            match self
+                .internal_rpc_client
+                .get_signature_status_with_commitment(&signature, self.options)
+                .await
+                .map_err(Box::new)?
+            {
+                Some(Ok(())) => return Ok(signature),
+                Some(Err(e)) => return Err(ClientError::SolanaClientError(Box::new(e.into()))),
+                None => {
+                    if !self
+                        .internal_rpc_client
+                        .is_blockhash_valid(&latest_hash, CommitmentConfig::processed())
+                        .await
+                        .map_err(Box::new)?
+                    {
+                        // Block hash is not found by some reason
+                        break;
+                    } else if cfg!(not(test)) {
+                        // Retry twice a second
+                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    }
+                }
+            }
+        }
+
+        Err(ClientError::SolanaClientError(Box::new(
+            RpcError::ForUser(
+                "unable to confirm transaction. This can happen in situations such as transaction \
+                 expiration and insufficient fee-payer funds"
+                    .to_string(),
+            )
+            .into(),
+        )))
     }
 
     async fn send_with_spinner_and_config_internal(
