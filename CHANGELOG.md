@@ -19,6 +19,7 @@ The minor version will be incremented upon a breaking change and the patch versi
 
 ### Fixes
 
+- client: Fix ignored commitment level ([#4666](https://github.com/solana-foundation/anchor/pull/4666)).
 - lang: Remove cloning `AccountInfo` to read lamports in `init_if_needed` codegen ([#4675](https://github.com/solana-foundation/anchor/pull/4675)).
 - lang: Guard `AccountLoader<T>::exit` against zero-copy buffer truncation and bail with `AccountDidNotDeserialize` instead of rewriting the discriminator over an undersized buffer ([#4633](https://github.com/otter-sec/anchor/pull/4633)).
 - lang: Shorten invariant lifetimes during `Context` creation ([#4363](https://github.com/solana-foundation/anchor/pull/4363)).
@@ -64,7 +65,6 @@ The minor version will be incremented upon a breaking change and the patch versi
 
 ### Fixes
 
-- client: Fix ignored commitment level ([#4666](https://github.com/solana-foundation/anchor/pull/4666)).
 - cli: Warn instead of aborting `anchor build` when a program keypair and `declare_id!` do not match ([#4705](https://github.com/otter-sec/anchor/pull/4705)).
 - lang: Snapshot CPI return data before `Return::get()` validates the source program ([#4624](https://github.com/otter-sec/anchor/pull/4624)).
 - lang/syn: Remove remaining fallible IDL generation paths from clippy-denied code ([#4631](https://github.com/otter-sec/anchor/pull/4631)).
